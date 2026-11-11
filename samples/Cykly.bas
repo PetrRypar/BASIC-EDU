@@ -1,0 +1,8 @@
+10 REM Malá násobilka
+20 FOR I = 1 TO 10
+30 FOR J = 1 TO 10
+40 PRINT I * J,
+50 NEXT J
+60 PRINT
+70 NEXT I
+80 END
