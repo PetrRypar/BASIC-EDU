@@ -6,15 +6,17 @@ BASIC EDU is unsigned. No signing service has approved this project and no certi
 has been assigned. A successful build or CI artifact is not a signed release.
 Windows Smart App Control can block unsigned EXE and DLL files.
 
-We intend to apply to [SignPath Foundation](https://signpath.org/) after publishing
-the source, documentation and an initial release. Acceptance requires a verifiable
+The source and initial unsigned pre-release are public at
+[PetrRypar/BASIC-EDU](https://github.com/PetrRypar/BASIC-EDU) and
+[v1.0.0-preview.1](https://github.com/PetrRypar/BASIC-EDU/releases/tag/v1.0.0-preview.1).
+We are preparing an application to [SignPath Foundation](https://signpath.org/).
+Acceptance requires a verifiable
 project reputation and is discretionary, not guaranteed.
 
 ## Proposed responsibilities
 
-Petr, the project initiator, is the proposed maintainer, reviewer and release approver.
-His public GitHub identity and repository address must be confirmed before publication.
-These are proposed roles, not an existing SignPath configuration. Contributions from
+Petr ([PetrRypar](https://github.com/PetrRypar)), the project initiator, is the maintainer,
+reviewer and release approver. These project roles are not an existing SignPath configuration. Contributions from
 other authors, including build-script changes, require maintainer review.
 Every signing request needs explicit maintainer approval. Repository and signing
 accounts must use multi-factor authentication before applying.
