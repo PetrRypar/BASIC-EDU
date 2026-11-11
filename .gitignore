@@ -1,0 +1,15 @@
+.dotnet/
+.dotnet-home/
+**/bin/
+**/obj/
+dist/
+dotnet-install.ps1
+.vs/
+**/.vs/
+*.user
+*.suo
+*.pfx
+*.p12
+*.key
+.env
+.env.*
