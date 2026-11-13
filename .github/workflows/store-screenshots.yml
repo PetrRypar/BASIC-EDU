@@ -1,0 +1,153 @@
+name: Capture BASIC EDU Store screenshots
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  screenshots:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Prepare capture harness (production application source remains unchanged)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist/store-capture-project -Force | Out-Null
+          @'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework><UseWPF>true</UseWPF><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+            <ItemGroup><ProjectReference Include="../../BasicEdu.App/BasicEdu.App.csproj" /></ItemGroup>
+          </Project>
+          '@ | Set-Content dist/store-capture-project/Capture.csproj -Encoding utf8
+          @'
+          using System.Diagnostics;
+          using System.IO;
+          using System.Reflection;
+          using System.Windows;
+          using System.Windows.Controls;
+          using System.Windows.Media;
+          using System.Windows.Media.Imaging;
+          using System.Windows.Threading;
+          using BasicEdu.App;
+          using BasicEdu.Core;
+          using ICSharpCode.AvalonEdit;
+
+          internal static class Capture
+          {
+              [STAThread]
+              static int Main()
+              {
+                  var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                  int result = 1;
+                  app.Startup += async (_, _) =>
+                  {
+                      var window = new MainWindow { Width = 1600, Height = 1000 };
+                      window.Show();
+                      var editor = (TextEditor)window.FindName("Editor");
+                      var run = (Button)window.FindName("RunButton");
+                      var step = (Button)window.FindName("StepButton");
+                      var stop = (Button)window.FindName("StopButton");
+                      var status = (TextBlock)window.FindName("Status");
+                      var examples = (ComboBox)window.FindName("ExamplesList");
+                      var input = (TextBox)window.FindName("InputBox");
+                      string output = Path.GetFullPath("dist/Store-screenshots");
+                      Directory.CreateDirectory(output);
+                      void Click(Button button) => button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                      void LoadExample(int index)
+                      {
+                          examples.SelectedIndex = index;
+                          editor.Text = ExamplePrograms.All[index].Source;
+                          editor.CaretOffset = 0;
+                          editor.ScrollToHome();
+                      }
+                      async Task Until(Func<bool> condition)
+                      {
+                          var watch = Stopwatch.StartNew();
+                          while (!condition() && watch.Elapsed < TimeSpan.FromSeconds(15)) await Task.Delay(25);
+                          if (!condition()) throw new Exception("Application did not reach expected state: " + status.Text);
+                      }
+                      async Task Save(string name)
+                      {
+                          await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+                          var content = (FrameworkElement)window.Content;
+                          // Render the live application at a desktop size independently
+                          // of the hosted runner's physical monitor resolution.
+                          content.Width = 1600;
+                          content.Height = 900;
+                          content.Measure(new Size(1600, 900));
+                          content.Arrange(new Rect(0, 0, 1600, 900));
+                          content.UpdateLayout();
+                          int width = (int)Math.Ceiling(content.ActualWidth);
+                          int height = (int)Math.Ceiling(content.ActualHeight);
+                          if (width < 1366 || height < 768) throw new Exception($"Window too small: {width}x{height}");
+                          var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+                          bitmap.Render(content);
+                          var encoder = new PngBitmapEncoder();
+                          encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                          using var file = File.Create(Path.Combine(output, name));
+                          encoder.Save(file);
+                          Console.WriteLine($"Captured real WPF application content: {name}, {width}x{height}");
+                      }
+                      try
+                      {
+                          LoadExample(2);
+                          Click(run);
+                          await Until(() => status.Text == "Program skončil.");
+                          await Save("01-editor-a-vystup.png");
+
+                          LoadExample(2);
+                          Click(step);
+                          await Until(() => status.Text.StartsWith("Další řádek: 20"));
+                          Click(step);
+                          await Until(() => status.Text.StartsWith("Další řádek: 30"));
+                          await Save("02-krokovani-a-promenne.png");
+                          Click(stop);
+                          await Until(() => status.Text == "Program byl zastaven.");
+
+                          LoadExample(30);
+                          Click(run);
+                          await Until(() => input.IsEnabled);
+                          await Save("03-led-semafor.png");
+                          Click(stop);
+                          await Until(() => status.Text == "Program byl zastaven.");
+
+                          File.WriteAllText(Path.Combine(output, "CTETE.txt"),
+                              "PNG soubory zachycují skutečný obsah běžícího okna BASIC EDU vykreslený WPF při 96 DPI. " +
+                              "Nejsou to makety. Nativní rámeček Windows není součástí snímků. " +
+                              "Před nahráním do Store zkontrolujte vzhled a soulad s vydávanou verzí.\n" +
+                              "01: Editor a výsledky výpočtů.\n02: Krokování s proměnnými A = 8, B = 3.\n03: Virtuální LED semafor a interaktivní vstup.\n");
+                          result = 0;
+                      }
+                      catch (Exception ex) { Console.Error.WriteLine(ex); }
+                      finally
+                      {
+                          typeof(MainWindow).GetField("dirty", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(window, false);
+                          app.Shutdown();
+                      }
+                  };
+                  app.Run();
+                  return result;
+              }
+          }
+          '@ | Set-Content dist/store-capture-project/Program.cs -Encoding utf8
+      - name: Build the harness and real application
+        shell: pwsh
+        run: dotnet build dist/store-capture-project/Capture.csproj -c Release
+      - name: Capture real application views
+        shell: pwsh
+        run: dotnet dist/store-capture-project/bin/Release/net10.0-windows/Capture.dll
+      - name: Upload screenshots for visual review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: BASIC-EDU-Store-screenshots
+          path: dist/Store-screenshots/
+          if-no-files-found: error
+          retention-days: 14
