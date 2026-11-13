@@ -78,23 +78,40 @@ jobs:
                       {
                           await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
                           var content = (FrameworkElement)window.Content;
-                          // Render the live application at a desktop size independently
-                          // of the hosted runner's physical monitor resolution.
-                          content.Width = 1600;
-                          content.Height = 900;
-                          content.Measure(new Size(1600, 900));
-                          content.Arrange(new Rect(0, 0, 1600, 900));
-                          content.UpdateLayout();
-                          int width = (int)Math.Ceiling(content.ActualWidth);
-                          int height = (int)Math.Ceiling(content.ActualHeight);
-                          if (width < 1366 || height < 768) throw new Exception($"Window too small: {width}x{height}");
-                          var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-                          bitmap.Render(content);
-                          var encoder = new PngBitmapEncoder();
-                          encoder.Frames.Add(BitmapFrame.Create(bitmap));
-                          using var file = File.Create(Path.Combine(output, name));
-                          encoder.Save(file);
-                          Console.WriteLine($"Captured real WPF application content: {name}, {width}x{height}");
+                          // A connected Window is clipped to the runner's small desktop.
+                          // Temporarily detach its actual live content for a full layout;
+                          // no UI is recreated, no pixel padding or scaling is applied.
+                          window.Content = null;
+                          try
+                          {
+                              const int width = 1600, height = 900;
+                              content.Width = width;
+                              content.Height = height;
+                              content.Measure(new Size(width, height));
+                              content.Arrange(new Rect(0, 0, width, height));
+                              content.UpdateLayout();
+                              var grid = (DataGrid)window.FindName("VariablesGrid");
+                              var position = grid.TransformToAncestor(content).Transform(new Point(0, 0));
+                              if (grid.ActualWidth < 100 || position.X + grid.ActualWidth > width)
+                                  throw new Exception("Variable panel is outside the captured content.");
+                              var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+                              bitmap.Render(content);
+                              // Reject missing margins/panels instead of accepting blank padding.
+                              var pixels = new byte[width * height * 4];
+                              bitmap.CopyPixels(pixels, width * 4, 0);
+                              foreach (var corner in new[] { (X: width - 8, Y: 8), (X: 8, Y: height - 8), (X: width - 8, Y: height - 8) })
+                              {
+                                  int offset = (corner.Y * width + corner.X) * 4;
+                                  if (pixels[offset + 3] < 250 || pixels[offset] + pixels[offset + 1] + pixels[offset + 2] < 300)
+                                      throw new Exception("Capture contains clipped or transparent outer content.");
+                              }
+                              var encoder = new PngBitmapEncoder();
+                              encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                              using var file = File.Create(Path.Combine(output, name));
+                              encoder.Save(file);
+                              Console.WriteLine($"Captured real WPF application content: {name}, {width}x{height}");
+                          }
+                          finally { window.Content = content; }
                       }
                       try
                       {
