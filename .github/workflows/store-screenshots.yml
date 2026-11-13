@@ -33,6 +33,7 @@ jobs:
           using System.Reflection;
           using System.Windows;
           using System.Windows.Controls;
+          using System.Windows.Interop;
           using System.Windows.Media;
           using System.Windows.Media.Imaging;
           using System.Windows.Threading;
@@ -82,20 +83,37 @@ jobs:
                           // Temporarily detach its actual live content for a full layout;
                           // no UI is recreated, no pixel padding or scaling is applied.
                           window.Content = null;
+                          HwndSource? captureHost = null;
                           try
                           {
                               const int width = 1600, height = 900;
+                              // Keep the real controls connected to a presentation source.
+                              // Unlike Window, this native host keeps the requested dimensions
+                              // even when the runner desktop is smaller than the capture.
+                              var parameters = new HwndSourceParameters("BASIC EDU capture")
+                              {
+                                  Width = width, Height = height,
+                                  WindowStyle = unchecked((int)0x80000000),
+                                  PositionX = 0, PositionY = 0
+                              };
+                              captureHost = new HwndSource(parameters);
+                              captureHost.RootVisual = content;
                               content.Width = width;
                               content.Height = height;
                               content.Measure(new Size(width, height));
                               content.Arrange(new Rect(0, 0, width, height));
                               content.UpdateLayout();
+                              await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
                               var grid = (DataGrid)window.FindName("VariablesGrid");
                               var position = grid.TransformToAncestor(content).Transform(new Point(0, 0));
                               if (grid.ActualWidth < 100 || position.X + grid.ActualWidth > width)
                                   throw new Exception("Variable panel is outside the captured content.");
                               var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
                               bitmap.Render(content);
+                              var encoder = new PngBitmapEncoder();
+                              encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                              using (var file = File.Create(Path.Combine(output, name))) encoder.Save(file);
+                              Console.WriteLine($"Captured {name}: content={content.ActualWidth}x{content.ActualHeight}, variables={position.X},{position.Y},{grid.ActualWidth}x{grid.ActualHeight}");
                               // Reject missing margins/panels instead of accepting blank padding.
                               var pixels = new byte[width * height * 4];
                               bitmap.CopyPixels(pixels, width * 4, 0);
@@ -103,15 +121,15 @@ jobs:
                               {
                                   int offset = (corner.Y * width + corner.X) * 4;
                                   if (pixels[offset + 3] < 250 || pixels[offset] + pixels[offset + 1] + pixels[offset + 2] < 300)
-                                      throw new Exception("Capture contains clipped or transparent outer content.");
+                                      throw new Exception($"Capture contains clipped or transparent outer content at {corner.X},{corner.Y}: BGRA={pixels[offset]},{pixels[offset+1]},{pixels[offset+2]},{pixels[offset+3]}. PNG saved for diagnosis.");
                               }
-                              var encoder = new PngBitmapEncoder();
-                              encoder.Frames.Add(BitmapFrame.Create(bitmap));
-                              using var file = File.Create(Path.Combine(output, name));
-                              encoder.Save(file);
                               Console.WriteLine($"Captured real WPF application content: {name}, {width}x{height}");
                           }
-                          finally { window.Content = content; }
+                          finally
+                          {
+                              if (captureHost != null) { captureHost.RootVisual = null; captureHost.Dispose(); }
+                              window.Content = content;
+                          }
                       }
                       try
                       {
@@ -162,6 +180,7 @@ jobs:
         shell: pwsh
         run: dotnet dist/store-capture-project/bin/Release/net10.0-windows/Capture.dll
       - name: Upload screenshots for visual review
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: BASIC-EDU-Store-screenshots
